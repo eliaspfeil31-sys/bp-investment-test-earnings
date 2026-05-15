@@ -1,0 +1,9 @@
+{
+  "name": "bp-earnings-calendar",
+  "version": "1.0.0",
+  "description": "BP Investments Earnings Calendar with AI auto-fill",
+  "engines": { "node": "20.x" },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}
