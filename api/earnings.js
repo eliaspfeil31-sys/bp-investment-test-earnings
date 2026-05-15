@@ -1,8 +1,96 @@
-// api/earnings.js
-// Fetches upcoming earnings for a given week from Yahoo Finance
-// and enriches each company with logo via Clearbit/Google
-
+// api/earnings.js — Financial Modeling Prep (zuverlässig, kostenlos bis 250 req/Tag)
 export const config = { runtime: 'edge' };
+
+const FMP_KEY = process.env.FMP_API_KEY || 'demo';
+
+function getWeekDates(offsetWeeks = 0) {
+  const now = new Date();
+  const day = now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1) + offsetWeeks * 7);
+  monday.setHours(0, 0, 0, 0);
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+  return { monday, friday };
+}
+
+function fmt(d) { return d.toISOString().slice(0, 10); }
+
+function dayName(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  return ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][d.getUTCDay()];
+}
+
+function weekLabel(monday, friday) {
+  const m = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return `${m(monday)} – ${m(friday)}`;
+}
+
+const LOGO_OVERRIDES = {
+  AAPL:'apple.com', GOOGL:'google.com', GOOG:'google.com', MSFT:'microsoft.com',
+  AMZN:'amazon.com', META:'meta.com', NVDA:'nvidia.com', TSLA:'tesla.com',
+  NFLX:'netflix.com', AMD:'amd.com', INTC:'intel.com', WMT:'walmart.com',
+  TGT:'target.com', HD:'homedepot.com', LOW:'lowes.com', NKE:'nike.com',
+  SBUX:'starbucks.com', MCD:'mcdonalds.com', JPM:'jpmorganchase.com',
+  BAC:'bankofamerica.com', GS:'goldmansachs.com', MS:'morganstanley.com',
+  V:'visa.com', MA:'mastercard.com', DIS:'disney.com', BA:'boeing.com',
+  XOM:'exxonmobil.com', CVX:'chevron.com', PFE:'pfizer.com', JNJ:'jnj.com',
+};
+
+function logoUrl(ticker, companyName) {
+  if (LOGO_OVERRIDES[ticker]) return `https://logo.clearbit.com/${LOGO_OVERRIDES[ticker]}?size=128`;
+  const clean = (companyName || ticker)
+    .toLowerCase()
+    .replace(/\b(inc|corp|ltd|llc|plc|co|group|holdings|technologies|technology|systems|solutions|services|international|global)\b/gi, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+  const domain = clean ? `${clean}.com` : `${ticker.toLowerCase()}.com`;
+  return `https://logo.clearbit.com/${domain}?size=128`;
+}
+
+export default async function handler(req) {
+  const { searchParams } = new URL(req.url);
+  const weekOffset = parseInt(searchParams.get('week') || '0', 10);
+  const { monday, friday } = getWeekDates(weekOffset);
+
+  const url = `https://financialmodelingprep.com/api/v3/earning_calendar?from=${fmt(monday)}&to=${fmt(friday)}&apikey=${FMP_KEY}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`FMP error ${res.status}`);
+    const raw = await res.json();
+
+    if (!Array.isArray(raw)) throw new Error(raw?.['Error Message'] || 'Unbekannter Fehler — API Key fehlt?');
+
+    const days = {
+      monday:{bmo:[],amc:[]}, tuesday:{bmo:[],amc:[]}, wednesday:{bmo:[],amc:[]},
+      thursday:{bmo:[],amc:[]}, friday:{bmo:[],amc:[]}
+    };
+
+    for (const e of raw) {
+      const day = dayName(e.date);
+      if (!days[day]) continue;
+      const slot = (e.time === 'bmo' || e.time === 'BMO') ? 'bmo' : 'amc';
+      if (days[day][slot].length >= 8) continue;
+      days[day][slot].push({
+        ticker: e.symbol,
+        company: e.symbol,
+        logoUrl: logoUrl(e.symbol, e.symbol),
+        bgMode: 'none',
+      });
+    }
+
+    return new Response(JSON.stringify({ weekLabel: weekLabel(monday, friday), days }), {
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 's-maxage=3600' }
+    });
+
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+    });
+  }
+}
 
 const DAYS_MAP = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 
